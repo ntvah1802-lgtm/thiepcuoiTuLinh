@@ -4174,21 +4174,47 @@ url:e,reason:"blocked_domain_not_allowlisted"},b.parentOrigin);throw new DOMExce
         ];
 
         const WISHES_STORAGE_KEY = 'wedding_rsvp_wishes_clean_v1';
+        const DEFAULT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbwk1qSacj6sG7mhGVJx-VpkK9ZTaVf_bDuNPVwGvJ8MclG-ah9Xon8ckwvL_BTVtct7xg/exec';
         let wishesList = [];
         let editingWishId = null;
 
-        function loadWishes() {
+        function getWebhookUrl() {
+            return (typeof WEDDING_CONFIG !== 'undefined' && WEDDING_CONFIG.googleSheetsWebhookUrl)
+                || document.body.getAttribute('data-webhook-url')
+                || DEFAULT_WEBHOOK_URL;
+        }
+
+        async function loadWishes() {
+            let ownedIds = [];
             try {
                 const saved = localStorage.getItem(WISHES_STORAGE_KEY);
                 if (saved) {
                     const parsed = JSON.parse(saved);
                     if (Array.isArray(parsed)) {
                         wishesList = parsed;
-                        return;
+                        ownedIds = parsed.filter(w => w.owned).map(w => w.id);
+                        renderWishes();
                     }
                 }
             } catch (e) {}
-            wishesList = [];
+
+            const webhookUrl = getWebhookUrl();
+            if (!webhookUrl) return;
+
+            try {
+                const res = await fetch(`${webhookUrl}?t=${Date.now()}`, { method: 'GET', redirect: 'follow' });
+                const result = await res.json();
+                if (result.status === 'success' && Array.isArray(result.data)) {
+                    wishesList = result.data.map(item => ({
+                        ...item,
+                        owned: ownedIds.includes(item.id)
+                    }));
+                    saveWishes();
+                    renderWishes();
+                }
+            } catch (e) {
+                console.error('Không thể tải lời chúc từ Google Sheet:', e);
+            }
         }
 
         function saveWishes() {
@@ -4333,6 +4359,7 @@ url:e,reason:"blocked_domain_not_allowlisted"},b.parentOrigin);throw new DOMExce
             const couple = `${WEDDING_CONFIG.brideName || 'Phương Linh'} & ${WEDDING_CONFIG.groomName || 'Đình Tú'}`;
             const message = msgInput.value.trim() || `Chúc mừng hạnh phúc ${couple}! Trăm năm tình viên mãn!`;
             const actionLabel = editingWishId ? 'Cập nhật' : 'Gửi mới';
+            const wishId = editingWishId || ('w-' + Date.now());
 
             if (editingWishId) {
                 const idx = wishesList.findIndex(w => w.id === editingWishId);
@@ -4343,7 +4370,7 @@ url:e,reason:"blocked_domain_not_allowlisted"},b.parentOrigin);throw new DOMExce
                 document.getElementById('editingWishBanner').classList.add('hidden');
             } else {
                 wishesList.unshift({
-                    id: 'w-' + Date.now(),
+                    id: wishId,
                     name,
                     status,
                     count: countNum,
@@ -4355,7 +4382,7 @@ url:e,reason:"blocked_domain_not_allowlisted"},b.parentOrigin);throw new DOMExce
             saveWishes();
             renderWishes();
 
-            const webhookUrl = WEDDING_CONFIG.googleSheetsWebhookUrl || document.body.getAttribute('data-webhook-url') || '';
+            const webhookUrl = getWebhookUrl();
             if (webhookUrl) {
                 submitBtn.disabled = true;
                 submitBtn.style.opacity = '0.7';
@@ -4365,6 +4392,7 @@ url:e,reason:"blocked_domain_not_allowlisted"},b.parentOrigin);throw new DOMExce
                         mode: 'no-cors',
                         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                         body: JSON.stringify({
+                            id: wishId,
                             name: name,
                             status: status,
                             count: countNum,
@@ -4372,6 +4400,7 @@ url:e,reason:"blocked_domain_not_allowlisted"},b.parentOrigin);throw new DOMExce
                             action: actionLabel
                         })
                     });
+                    setTimeout(loadWishes, 800);
                 } catch (err) {}
                 submitBtn.disabled = false;
                 submitBtn.style.opacity = '1';
@@ -4382,7 +4411,6 @@ url:e,reason:"blocked_domain_not_allowlisted"},b.parentOrigin);throw new DOMExce
             triggerDelicateHeartShower(16);
             showToast('Cảm ơn bạn đã xác nhận tham dự & gửi lời chúc!');
         }
-
         // ==========================================
         // 9. MODALS (GIFT BOX & LIGHTBOX)
         // ==========================================
